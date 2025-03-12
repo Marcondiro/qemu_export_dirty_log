@@ -18,6 +18,7 @@ system_ss.add(files(
   'cpr-transfer.c',
   'cpu-throttle.c',
   'dirtyrate.c',
+  'dirtylog.c',
   'exec.c',
   'fd.c',
   'file.c',
