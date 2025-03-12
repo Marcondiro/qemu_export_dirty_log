@@ -48,6 +48,7 @@
 #include "kvm-cpus.h"
 #include "system/dirtylimit.h"
 #include "qemu/range.h"
+#include "migration/dirtylog.h"
 
 #include "hw/boards.h"
 #include "system/stats.h"
@@ -850,6 +851,12 @@ static uint32_t kvm_dirty_ring_reap_one(KVMState *s, CPUState *cpu)
                                  cur->offset);
         dirty_gfn_set_collected(cur);
         trace_kvm_dirty_ring_page(cpu->cpu_index, fetch, cur->offset);
+        if (global_dirty_tracking & GLOBAL_DIRTY_EXPORT) {
+            struct dirty_gfn* gfn = g_new(struct dirty_gfn, 1);
+            gfn->slot = cur->slot;
+            gfn->offset = cur->offset;
+            g_hash_table_add(dirty_log_hash_set, gfn);
+        }
         fetch++;
         count++;
     }
