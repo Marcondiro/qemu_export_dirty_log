@@ -19,6 +19,7 @@ system_ss.add(files(
   'cpr-exec.c',
   'cpu-throttle.c',
   'dirtyrate.c',
+  'dirtylog.c',
   'exec.c',
   'fd.c',
   'file.c',
