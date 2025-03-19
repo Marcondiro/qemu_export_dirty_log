@@ -727,6 +727,34 @@ size_t coroutine_mixed_fn qemu_get_buffer(QEMUFile *f, uint8_t *buf, size_t size
 }
 
 /*
+ * Read 'size' bytes of data from the file and ignore it.
+ * 'size' can be larger than the internal buffer.
+ *
+ * It will return size bytes unless there was an error, in which case it will
+ * return as many as it managed to read (assuming blocking fd's which
+ * all current QEMUFile are)
+ */
+size_t coroutine_mixed_fn qemu_skip_buffer(QEMUFile *f, size_t size)
+{
+    size_t pending = size;
+    size_t done = 0;
+
+    while (pending > 0) {
+        size_t res;
+        uint8_t *src;
+
+        res = qemu_peek_buffer(f, &src, MIN(pending, IO_BUF_SIZE), 0);
+        if (res == 0) {
+            return done;
+        }
+        qemu_file_skip(f, res);
+        pending -= res;
+        done += res;
+    }
+    return done;
+}
+
+/*
  * Read 'size' bytes of data from the file.
  * 'size' can be larger than the internal buffer.
  *

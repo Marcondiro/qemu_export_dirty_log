@@ -23,4 +23,8 @@ struct dirty_gfn {
 	__u64 offset;
 };
 
+bool start_dirty_log_export(Error **errp);
+void stop_dirty_log_export(Error **errp);
+void loadvm_for_hotreload(Error **errp, const char *name);
+void hotreload(Error **errp);
 #endif

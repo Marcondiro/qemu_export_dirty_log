@@ -821,6 +821,15 @@ static void dirty_gfn_set_collected(struct kvm_dirty_gfn *gfn)
     qatomic_store_release(&gfn->flags, KVM_DIRTY_GFN_F_RESET);
 }
 
+static void kvm_dirty_ring_hotreload_add(KVMState *s, struct kvm_dirty_gfn *gfn) {
+    KVMMemoryListener *kml = s->as[gfn->slot >> 16].ml;
+    KVMSlot *mem = &kml->slots[gfn->slot & 0xffff];
+    uint64_t *key = g_new(uint64_t, 1);
+
+    *key = mem->start_addr + (gfn->offset << TARGET_PAGE_BITS);
+    g_hash_table_add(dirty_log_hash_set, key);
+}
+
 /*
  * Should be with all slots_lock held for the address spaces.  It returns the
  * dirty page we've collected on this dirty ring.
@@ -852,11 +861,8 @@ static uint32_t kvm_dirty_ring_reap_one(KVMState *s, CPUState *cpu)
                                  cur->offset);
         dirty_gfn_set_collected(cur);
         trace_kvm_dirty_ring_page(cpu->cpu_index, fetch, cur->offset);
-        if (global_dirty_tracking & GLOBAL_DIRTY_EXPORT) {
-            struct dirty_gfn* gfn = g_new(struct dirty_gfn, 1);
-            gfn->slot = cur->slot;
-            gfn->offset = cur->offset;
-            g_hash_table_add(dirty_log_hash_set, gfn);
+        if (global_dirty_tracking & GLOBAL_DIRTY_TO_HASHMAP) {
+            kvm_dirty_ring_hotreload_add(s, cur);
         }
         fetch++;
         count++;

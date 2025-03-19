@@ -61,6 +61,7 @@
 #include "options.h"
 #include "system/dirtylimit.h"
 #include "system/kvm.h"
+#include "dirtylog.h"
 
 #include "hw/boards.h" /* for machine_dump_guest_core() */
 
@@ -88,6 +89,10 @@
  * the pages region in the migration file at a time.
  */
 #define MAPPED_RAM_LOAD_BUF_SIZE 0x100000
+
+//TODO somehow make sure that the snapshot didn't change in between?
+char* hotreload_snapshot = NULL;
+bool use_hotreload_snapshot = false;
 
 XBZRLECacheStats xbzrle_counters;
 
@@ -4184,7 +4189,13 @@ static int ram_load_precopy(QEMUFile *f)
             break;
 
         case RAM_SAVE_FLAG_PAGE:
-            qemu_get_buffer(f, host, TARGET_PAGE_SIZE);
+            if (use_hotreload_snapshot && !g_hash_table_remove(dirty_log_hash_set, &addr)) {
+                qemu_skip_buffer(f, TARGET_PAGE_SIZE);
+                error_printf("0x%016lx skip\n", addr);
+            } else {
+                qemu_get_buffer(f, host, TARGET_PAGE_SIZE);
+                error_printf("0x%016lx dirty\n", addr);
+            }
             break;
 
         case RAM_SAVE_FLAG_XBZRLE:
@@ -4228,6 +4239,9 @@ static int ram_load_precopy(QEMUFile *f)
         }
     }
 
+    if(use_hotreload_snapshot) {
+        //assert(g_hash_table_size(dirty_log_hash_set) == 0);
+    }
     return ret;
 }
 
