@@ -61,6 +61,8 @@
 #include "options.h"
 #include "system/dirtylimit.h"
 #include "system/kvm.h"
+#include "dirtylog.h"
+#include "exec/address-spaces.h"
 
 #include "hw/boards.h" /* for machine_dump_guest_core() */
 
@@ -88,6 +90,10 @@
  * the pages region in the migration file at a time.
  */
 #define MAPPED_RAM_LOAD_BUF_SIZE 0x100000
+
+//TODO somehow make sure that the snapshot didn't change in between?
+char* hotreload_snapshot = NULL;
+unsigned int global_hotreload = GLOBAL_HOTRELOAD_OFF;
 
 XBZRLECacheStats xbzrle_counters;
 
@@ -1119,9 +1125,14 @@ static int save_zero_page(RAMState *rs, PageSearchStatus *pss,
     stat64_add(&mig_stats.zero_pages, 1);
 
     if (migrate_mapped_ram()) {
-        /* zero pages are not transferred with mapped-ram */
-        clear_bit_atomic(offset >> TARGET_PAGE_BITS, pss->block->file_bmap);
-        return 1;
+        // /* zero pages are not transferred with mapped-ram */
+        // clear_bit_atomic(offset >> TARGET_PAGE_BITS, pss->block->file_bmap);
+        // return 1;
+        /*
+         * Quick and dirty fix for snapshots: force zero pages to be saved since
+         * at restore the memory can be dirty and not always 0 as in migration
+         */
+        return 0;
     }
 
     len += save_page_header(pss, file, pss->block, offset | RAM_SAVE_FLAG_ZERO);
@@ -3920,6 +3931,31 @@ err:
     return false;
 }
 
+static void dirty_ring_to_bitmap(gpointer key, gpointer value, gpointer block_bitmap_errp) {
+    MemoryRegion *dirty_mr;
+    RAMBlock *block = ((RAMBlock **) block_bitmap_errp)[0];
+    unsigned long *bitmap = ((unsigned long **) block_bitmap_errp)[1];
+    Error **errp = ((Error ***) block_bitmap_errp)[2];
+    uint64_t addr = *((uint64_t *) key);
+    hwaddr _xlat, _len;
+    size_t page_offset;
+
+    dirty_mr = address_space_translate(&address_space_memory, addr, &_xlat,
+                                       &_len, false, MEMTXATTRS_UNSPECIFIED);
+    
+    if (!dirty_mr) {
+        error_setg(errp, "Failed to translate address %lx", addr);
+        return;
+    }
+
+    if (dirty_mr->ram_block != block) {
+        return;
+    }
+
+    page_offset = (addr - dirty_mr->ram_block->offset) >> TARGET_PAGE_BITS;
+    set_bit(page_offset, bitmap);
+}
+
 static void parse_ramblock_mapped_ram(QEMUFile *f, RAMBlock *block,
                                       ram_addr_t length, Error **errp)
 {
@@ -3951,8 +3987,15 @@ static void parse_ramblock_mapped_ram(QEMUFile *f, RAMBlock *block,
     bitmap_size = BITS_TO_LONGS(num_pages) * sizeof(unsigned long);
 
     bitmap = g_malloc0(bitmap_size);
-    if (qemu_get_buffer_at(f, (uint8_t *)bitmap, bitmap_size,
-                           header.bitmap_offset) != bitmap_size) {
+    if (global_hotreload & GLOBAL_HOTRELOAD_LOADVM) {
+        void* block_bitmap_errp[3] = { block, bitmap, errp };
+        g_hash_table_foreach(dirty_log_hash_set, dirty_ring_to_bitmap,
+            block_bitmap_errp);
+        if (*errp) {
+            return;
+        }
+    } else if (qemu_get_buffer_at(f, (uint8_t *)bitmap, bitmap_size,
+                                  header.bitmap_offset) != bitmap_size) {
         error_setg(errp, "Error reading dirty bitmap");
         return;
     }

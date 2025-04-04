@@ -1,6 +1,6 @@
-# QEMU with KVM dirty log export capability
+# QEMU with KVM dirty log export and hotreload capability
 
-## How to use this
+## How to use dirty log export
 
 After building (see official QEMU docs), run QEMU with the following options:
 
@@ -12,7 +12,7 @@ build/qemu-system-x86_64 \
 
 Connect to the monitor with `nc localhost 4444` and start/stop the logging as needed with `start_dirty_log_export` and `stop_dirty_log_export`.
 
-On stop, the dirty log will be written to `dirty_log_[TIMESTAMP]` in the current directory, each row has the format `slot gfn`.
+On stop, the dirty log will be written to `dirty_log_[TIMESTAMP]` in the current directory.
 
 To have more visibility on the dirty log, you can add the following tracing option to QEMU cli:
 
