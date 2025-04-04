@@ -70,6 +70,7 @@
 #include "yank_functions.h"
 #include "system/qtest.h"
 #include "options.h"
+#include "dirtylog.h"
 
 const unsigned int postcopy_ram_discard_version;
 
@@ -3412,6 +3413,12 @@ bool load_snapshot(const char *name, const char *vmstate,
     QEMUFile *f;
     int ret;
     MigrationIncomingState *mis = migration_incoming_get_current();
+
+    if (hotreload_snapshot) {
+        stop_dirty_log_export(errp);
+        free(hotreload_snapshot);
+        hotreload_snapshot = NULL;
+    }
 
     if (!bdrv_all_can_snapshot(has_devices, devices, errp)) {
         return false;

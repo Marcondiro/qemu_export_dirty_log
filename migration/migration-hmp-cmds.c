@@ -32,6 +32,8 @@
 #include "system/system.h"
 #include "options.h"
 #include "migration.h"
+#include "ram.h"
+#include "dirtylog.h"
 
 static void migration_global_dump(Monitor *mon)
 {
@@ -377,6 +379,25 @@ void hmp_loadvm(Monitor *mon, const QDict *qdict)
     if (load_snapshot(name, NULL, false, NULL, &err)) {
         load_snapshot_resume(saved_state);
     }
+
+    hmp_handle_error(mon, err);
+}
+
+void hmp_loadvm_for_hotreload(Monitor *mon, const QDict *qdict)
+{
+    const char *name = qdict_get_str(qdict, "name");
+    Error *err = NULL;
+
+    loadvm_for_hotreload(&err, name);
+
+    hmp_handle_error(mon, err);
+}
+
+void hmp_hotreload(Monitor *mon, const QDict *qdict)
+{
+    Error *err = NULL;
+    
+    hotreload(&err);
 
     hmp_handle_error(mon, err);
 }
