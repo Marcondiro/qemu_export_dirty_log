@@ -18,37 +18,42 @@
 #include "monitor/monitor.h"
 #include "system/kvm.h"
 #include "exec/memory.h"
+#include "ram.h"
+#include "migration/snapshot.h"
+#include "system/runstate.h"
 
 /* CPU generation id */
 static unsigned int gen_id;
 
 /* Dirtied pages between start_dirty_log_export and stop */
-GHashTable* dirty_log_hash_set = NULL;
+GHashTable *dirty_log_hash_set = NULL;
 
 static void serialize_entry(gpointer key, gpointer value, gpointer user_data)
 {
     FILE *file = user_data;
-    struct dirty_gfn *gfn = key;
-    
-    assert(file != NULL);
-    assert(gfn != NULL);
+    u_int64_t *paddr = key;
 
-    fprintf(file, "0x%08x 0x%016llx\n", gfn->slot, gfn->offset);
+    assert(file != NULL);
+    assert(paddr != NULL);
+
+    fprintf(file, "0x%016lx\n", *paddr);
 }
 
 static bool serialize_dirty_log_hash_set(Error **errp)
 {
     FILE *file;
     char file_name[64] = {0};
-    
-    if (!dirty_log_hash_set) {
+
+    if (!dirty_log_hash_set)
+    {
         error_setg(errp, "dirty_log_hash_set is NULL");
         return false;
     }
 
     snprintf(file_name, sizeof(file_name), "dirty_log_%li", time(NULL));
     file = fopen(file_name, "w");
-    if (!file) {
+    if (!file)
+    {
         error_setg(errp, "Failed to open dirty_log file");
         return false;
     }
@@ -59,56 +64,46 @@ static bool serialize_dirty_log_hash_set(Error **errp)
     return true;
 }
 
-static guint dirty_gfn_hash(gconstpointer key)
-{
-    const struct dirty_gfn *gfn = key;
-    const guint offset_hash = g_int64_hash(&gfn->offset);
-    const guint slot_hash = g_int_hash(&gfn->slot);
-    return offset_hash ^ slot_hash;
-}
-
-static gboolean entry_equal(gconstpointer a, gconstpointer b) {
-    const struct dirty_gfn  *gfn_a = a;
-    const struct dirty_gfn  *gfn_b = b;
-    return (gfn_a->offset == gfn_b->offset) && (gfn_a->slot == gfn_b->slot);
-}
-
-static void start_dirty_log_export(Error **errp)
+bool start_dirty_log_export(Error **errp)
 {
     bool ret;
-
-    if (global_dirty_tracking & GLOBAL_DIRTY_EXPORT)
-    {
-        error_setg(errp, "Dirty tracking export is already running!");
-        return;
-    }
-
     /*
      * dirty_log_export only works when kvm dirty ring is enabled.
      */
     if (!kvm_dirty_ring_enabled())
     {
         error_setg(errp, "dirty ring is not enabled! run Qemu with -accel kvm,dirty-ring-size=4096");
-        return;
+        return false;
     }
 
-    dirty_log_hash_set = g_hash_table_new_full(dirty_gfn_hash, entry_equal, g_free, NULL);
-    ret = memory_global_dirty_log_start(GLOBAL_DIRTY_EXPORT, errp);
-    if (!ret) {
+    if (dirty_log_hash_set)
+    {
+        g_hash_table_remove_all(dirty_log_hash_set);
+    }
+    else
+    {
+        dirty_log_hash_set = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+    }
+
+    ret = memory_global_dirty_log_start(GLOBAL_DIRTY_TO_HASHMAP, errp);
+    if (!ret)
+    {
         g_hash_table_destroy(dirty_log_hash_set);
         dirty_log_hash_set = NULL;
-        return;
+        return false;
     }
 
     WITH_QEMU_LOCK_GUARD(&qemu_cpu_list_lock)
     {
         gen_id = cpu_list_generation_id_get();
     }
+    
+    return true;
 }
 
-static void stop_dirty_log_export(Error **errp)
+void stop_dirty_log_export(Error **errp)
 {
-    if (!(global_dirty_tracking & GLOBAL_DIRTY_EXPORT))
+    if (!(global_dirty_tracking & GLOBAL_DIRTY_TO_HASHMAP))
     {
         error_setg(errp, "Dirty tracking export is not running!");
         return;
@@ -123,21 +118,77 @@ static void stop_dirty_log_export(Error **errp)
     }
 
     memory_global_dirty_log_sync(false);
-    memory_global_dirty_log_stop(GLOBAL_DIRTY_EXPORT);
-
-    serialize_dirty_log_hash_set(errp);
-    g_hash_table_destroy(dirty_log_hash_set);
-    dirty_log_hash_set = NULL;
+    memory_global_dirty_log_stop(GLOBAL_DIRTY_TO_HASHMAP);
 }
 
+void loadvm_for_hotreload(Error **errp, const char *name)
+{
+    RunState saved_state = runstate_get();
+
+    vm_stop(RUN_STATE_RESTORE_VM);
+
+    if (hotreload_snapshot)
+    {
+        stop_dirty_log_export(errp);
+        free(hotreload_snapshot);
+        hotreload_snapshot = NULL;
+    }
+
+    if (load_snapshot(name, NULL, false, NULL, errp))
+    {
+        if (start_dirty_log_export(errp))
+        {
+            size_t len = strlen(name) + 1;
+            hotreload_snapshot = malloc(len);
+            strncpy(hotreload_snapshot, name, len);
+        }
+        load_snapshot_resume(saved_state);
+    }
+}
+
+void hotreload(Error **errp)
+{
+    if (!hotreload_snapshot)
+    {
+        error_setg(errp, "Hotreload not set up. Use loadvm_for_hotreload before this.");
+        return;
+    }
+
+    RunState saved_state = runstate_get();
+
+    assert(!global_hotreload);
+    global_hotreload = GLOBAL_HOTRELOAD_LOADVM;
+
+    vm_stop(RUN_STATE_RESTORE_VM);
+    stop_dirty_log_export(errp);
+    if (*errp)
+    {
+        // fallback to normal reload in case stop_dirty_log_export fails
+        global_hotreload = GLOBAL_HOTRELOAD_OFF;
+    }
+
+    if (load_snapshot(hotreload_snapshot, NULL, false, NULL, errp))
+    {
+        start_dirty_log_export(errp);
+        load_snapshot_resume(saved_state);
+    }
+    else
+    {
+        free(hotreload_snapshot);
+        hotreload_snapshot = NULL;
+    }
+
+    global_hotreload = GLOBAL_HOTRELOAD_OFF;
+}
 
 void hmp_start_dirty_log_export(Monitor *mon, const QDict *qdict)
 {
     Error *err = NULL;
 
     start_dirty_log_export(&err);
-    
-    if (err) {
+
+    if (err)
+    {
         hmp_handle_error(mon, err);
         return;
     }
@@ -150,8 +201,14 @@ void hmp_stop_dirty_log_export(Monitor *mon, const QDict *qdict)
     Error *err = NULL;
 
     stop_dirty_log_export(&err);
-    
-    if (err) {
+
+    if (!err)
+    {
+        serialize_dirty_log_hash_set(&err);
+    }
+
+    if (err)
+    {
         hmp_handle_error(mon, err);
         return;
     }
