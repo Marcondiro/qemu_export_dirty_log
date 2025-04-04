@@ -364,6 +364,35 @@ SRST
 ERST
 
     {
+        .name       = "loadvm_for_hotreload",
+        .args_type  = "name:s",
+        .params     = "tag",
+        .help       = "restore a VM snapshot from its tag and use it for future hotrealoads",
+        .cmd        = hmp_loadvm_for_hotreload,
+        .command_completion = loadvm_completion,
+    },
+
+SRST
+``loadvm`` *tag*
+  Set the whole virtual machine to the snapshot identified by the tag
+  *tag* and use it for future hotrealoads.
+ERST
+
+    {
+        .name       = "hotreload",
+        .args_type  = "",
+        .params     = "",
+        .help       = "load vm snapshot exploiting dirty logging",
+        .cmd        = hmp_hotreload,
+    },
+
+SRST
+``hotreload``
+  load vm snapshot exploiting dirty logging.
+  Must follow a loadvm_for_hotreload.
+ERST
+
+    {
         .name       = "delvm",
         .args_type  = "name:s",
         .params     = "tag",
