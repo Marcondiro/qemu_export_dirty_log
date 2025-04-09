@@ -3387,7 +3387,11 @@ bool load_snapshot(const char *name, const char *vmstate,
         return false;
     }
 
-    if (hotreload_snapshot) {
+    if (!migrate_can_snapshot(errp)) {
+        return false;
+    }
+
+    if (global_hotreload != GLOBAL_HOTRELOAD_LOADVM && hotreload_snapshot) {
         stop_dirty_log_export(errp);
         free(hotreload_snapshot);
         hotreload_snapshot = NULL;
