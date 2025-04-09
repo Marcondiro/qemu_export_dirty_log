@@ -3932,28 +3932,25 @@ err:
 }
 
 static void dirty_ring_to_bitmap(gpointer key, gpointer value, gpointer block_bitmap_errp) {
-    MemoryRegion *dirty_mr;
+    RAMBlock *dirty_block;
     RAMBlock *block = ((RAMBlock **) block_bitmap_errp)[0];
     unsigned long *bitmap = ((unsigned long **) block_bitmap_errp)[1];
     Error **errp = ((Error ***) block_bitmap_errp)[2];
-    uint64_t addr = *((uint64_t *) key);
-    hwaddr _xlat, _len;
-    size_t page_offset;
+    void *dirty_host = *((void **) key);
+    ram_addr_t offset;
 
-    dirty_mr = address_space_translate(&address_space_memory, addr, &_xlat,
-                                       &_len, false, MEMTXATTRS_UNSPECIFIED);
+    dirty_block = qemu_ram_block_from_host(dirty_host, false, &offset);
     
-    if (!dirty_mr) {
-        error_setg(errp, "Failed to translate address %lx", addr);
+    if (!dirty_block) {
+        error_setg(errp, "Failed to translate host address %p", dirty_host);
         return;
     }
 
-    if (dirty_mr->ram_block != block) {
+    if (dirty_block != block) {
         return;
     }
 
-    page_offset = (addr - dirty_mr->ram_block->offset) >> TARGET_PAGE_BITS;
-    set_bit(page_offset, bitmap);
+    set_bit(offset >> TARGET_PAGE_BITS, bitmap);
 }
 
 static void parse_ramblock_mapped_ram(QEMUFile *f, RAMBlock *block,
