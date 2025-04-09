@@ -31,7 +31,7 @@ GHashTable *dirty_log_hash_set = NULL;
 static void serialize_entry(gpointer key, gpointer value, gpointer user_data)
 {
     FILE *file = user_data;
-    u_int64_t *paddr = key;
+    u_int64_t *paddr = value;
 
     assert(file != NULL);
     assert(paddr != NULL);
@@ -82,7 +82,7 @@ bool start_dirty_log_export(Error **errp)
     }
     else
     {
-        dirty_log_hash_set = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+        dirty_log_hash_set = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, g_free);
     }
 
     ret = memory_global_dirty_log_start(GLOBAL_DIRTY_TO_HASHMAP, errp);
@@ -127,17 +127,11 @@ void loadvm_for_hotreload(Error **errp, const char *name)
 
     vm_stop(RUN_STATE_RESTORE_VM);
 
-    if (hotreload_snapshot)
-    {
-        stop_dirty_log_export(errp);
-        free(hotreload_snapshot);
-        hotreload_snapshot = NULL;
-    }
-
     if (load_snapshot(name, NULL, false, NULL, errp))
     {
         if (start_dirty_log_export(errp))
         {
+            global_hotreload = GLOBAL_HOTRELOAD_PREPARE;
             size_t len = strlen(name) + 1;
             hotreload_snapshot = malloc(len);
             strncpy(hotreload_snapshot, name, len);
@@ -148,7 +142,7 @@ void loadvm_for_hotreload(Error **errp, const char *name)
 
 void hotreload(Error **errp)
 {
-    if (!hotreload_snapshot)
+    if (!hotreload_snapshot || global_hotreload != GLOBAL_HOTRELOAD_PREPARE)
     {
         error_setg(errp, "Hotreload not set up. Use loadvm_for_hotreload before this.");
         return;
@@ -156,7 +150,6 @@ void hotreload(Error **errp)
 
     RunState saved_state = runstate_get();
 
-    assert(!global_hotreload);
     global_hotreload = GLOBAL_HOTRELOAD_LOADVM;
 
     vm_stop(RUN_STATE_RESTORE_VM);
@@ -178,7 +171,7 @@ void hotreload(Error **errp)
         hotreload_snapshot = NULL;
     }
 
-    global_hotreload = GLOBAL_HOTRELOAD_OFF;
+    global_hotreload = GLOBAL_HOTRELOAD_PREPARE;
 }
 
 void hmp_start_dirty_log_export(Monitor *mon, const QDict *qdict)
