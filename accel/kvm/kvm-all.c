@@ -825,9 +825,11 @@ static void kvm_dirty_ring_hotreload_add(KVMState *s, struct kvm_dirty_gfn *gfn)
     KVMMemoryListener *kml = s->as[gfn->slot >> 16].ml;
     KVMSlot *mem = &kml->slots[gfn->slot & 0xffff];
     uint64_t *key = g_new(uint64_t, 1);
+    uint64_t *value = g_new(uint64_t, 1);
 
-    *key = mem->start_addr + (gfn->offset << TARGET_PAGE_BITS);
-    g_hash_table_add(dirty_log_hash_set, key);
+    *key = (uint64_t) mem->ram + (gfn->offset << TARGET_PAGE_BITS);
+    *value = mem->start_addr + (gfn->offset << TARGET_PAGE_BITS);
+    g_hash_table_insert(dirty_log_hash_set, key, value);
 }
 
 /*
