@@ -1125,14 +1125,14 @@ static int save_zero_page(RAMState *rs, PageSearchStatus *pss,
     stat64_add(&mig_stats.zero_pages, 1);
 
     if (migrate_mapped_ram()) {
-        // /* zero pages are not transferred with mapped-ram */
-        // clear_bit_atomic(offset >> TARGET_PAGE_BITS, pss->block->file_bmap);
-        // return 1;
-        /*
-         * Quick and dirty fix for snapshots: force zero pages to be saved since
-         * at restore the memory can be dirty and not always 0 as in migration
-         */
-        return 0;
+        /* zero pages are not transferred with mapped-ram */
+        clear_bit_atomic(offset >> TARGET_PAGE_BITS, pss->block->file_bmap);
+        return 1;
+        // /*
+        //  * Quick and dirty fix for snapshots: force zero pages to be saved since
+        //  * at restore the memory can be dirty and not always 0 as in migration
+        //  */
+        // return 0;
     }
 
     len += save_page_header(pss, file, pss->block, offset | RAM_SAVE_FLAG_ZERO);
@@ -3471,7 +3471,6 @@ static inline void *colo_cache_from_block_offset(RAMBlock *block,
  * determined to be zero, then zap it.
  *
  * @host: host address for the zero page
- * @ch: what the page is filled from.  We only support zero
  * @size: size of the zero page
  */
 void ram_handle_zero(void *host, uint64_t size)
@@ -3881,7 +3880,7 @@ static bool read_ramblock_mapped_ram(QEMUFile *f, RAMBlock *block,
                                      Error **errp)
 {
     ERRP_GUARD();
-    unsigned long set_bit_idx, clear_bit_idx;
+    unsigned long set_bit_idx, clear_bit_idx = 0;
     ram_addr_t offset;
     void *host;
     size_t read, unread, size;
@@ -3890,6 +3889,18 @@ static bool read_ramblock_mapped_ram(QEMUFile *f, RAMBlock *block,
          set_bit_idx < num_pages;
          set_bit_idx = find_next_bit(bitmap, num_pages, clear_bit_idx + 1)) {
 
+        // Zero pages
+        unread = TARGET_PAGE_SIZE * (set_bit_idx - clear_bit_idx);
+        offset = clear_bit_idx << TARGET_PAGE_BITS;
+        host = host_from_ram_block_offset(block, offset);
+        if (!host) {
+            error_setg(errp, "zero page outside of ramblock %s range",
+                       block->idstr);
+            return false;
+        }
+        ram_handle_zero(host, unread);
+
+        // Non-zero pages
         clear_bit_idx = find_next_zero_bit(bitmap, num_pages, set_bit_idx + 1);
 
         unread = TARGET_PAGE_SIZE * (clear_bit_idx - set_bit_idx);
@@ -3919,6 +3930,19 @@ static bool read_ramblock_mapped_ram(QEMUFile *f, RAMBlock *block,
             offset += read;
             unread -= read;
         }
+    }
+
+    /* Handle possible trailing 0 pages */
+    if (clear_bit_idx < num_pages) {
+        unread = TARGET_PAGE_SIZE * (num_pages - clear_bit_idx);
+        offset = clear_bit_idx << TARGET_PAGE_BITS;
+        host = host_from_ram_block_offset(block, offset);
+        if (!host) {
+            error_setg(errp, "zero page outside of ramblock %s range",
+                       block->idstr);
+            return false;
+        }
+        ram_handle_zero(host, unread);
     }
 
     return true;
