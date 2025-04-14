@@ -21,6 +21,7 @@
 #include "ram.h"
 #include "migration/snapshot.h"
 #include "system/runstate.h"
+#include "exec/ramblock.h"
 
 /* CPU generation id */
 static unsigned int gen_id;
@@ -31,12 +32,18 @@ GHashTable *dirty_log_hash_set = NULL;
 static void serialize_entry(gpointer key, gpointer value, gpointer user_data)
 {
     FILE *file = user_data;
+    void **host = key;
     u_int64_t *paddr = value;
-
+    ram_addr_t _offset;
+    RAMBlock *blk;
+ 
     assert(file != NULL);
+    assert(host != NULL);
     assert(paddr != NULL);
+ 
+    blk = qemu_ram_block_from_host(*host, false, &_offset);
 
-    fprintf(file, "0x%016lx\n", *paddr);
+    fprintf(file, "0x%016lx - %s\n", *paddr, blk->idstr);
 }
 
 static bool serialize_dirty_log_hash_set(Error **errp)
