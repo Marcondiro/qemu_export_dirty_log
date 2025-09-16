@@ -369,6 +369,7 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
 
 void hmp_loadvm(Monitor *mon, const QDict *qdict)
 {
+    int64_t stamp;
     RunState saved_state = runstate_get();
 
     const char *name = qdict_get_str(qdict, "name");
@@ -376,9 +377,13 @@ void hmp_loadvm(Monitor *mon, const QDict *qdict)
 
     vm_stop(RUN_STATE_RESTORE_VM);
 
+    stamp = get_clock();
     if (load_snapshot(name, NULL, false, NULL, &err)) {
         load_snapshot_resume(saved_state);
     }
+
+    stamp = get_clock() - stamp;
+    monitor_printf(mon, "Loaded VM state from snapshot '%s' took %"PRIi64" us\n", name, stamp/1000);
 
     hmp_handle_error(mon, err);
 }
@@ -404,10 +409,15 @@ void hmp_hotreload(Monitor *mon, const QDict *qdict)
 
 void hmp_savevm(Monitor *mon, const QDict *qdict)
 {
+    int64_t stamp;
     Error *err = NULL;
 
+    stamp = get_clock();
     save_snapshot(qdict_get_try_str(qdict, "name"),
                   true, NULL, false, NULL, &err);
+    stamp = get_clock() - stamp;
+    monitor_printf(mon, "Saved VM state took %"PRIi64" us\n", stamp/1000);
+
     hmp_handle_error(mon, err);
 }
 
