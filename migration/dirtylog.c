@@ -17,11 +17,11 @@
 #include "monitor/hmp.h"
 #include "monitor/monitor.h"
 #include "system/kvm.h"
-#include "exec/memory.h"
+#include "system/memory.h"
 #include "ram.h"
 #include "migration/snapshot.h"
 #include "system/runstate.h"
-#include "exec/ramblock.h"
+#include "system/ramblock.h"
 
 /* CPU generation id */
 static unsigned int gen_id;
