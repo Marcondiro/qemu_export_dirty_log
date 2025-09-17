@@ -62,7 +62,7 @@
 #include "system/dirtylimit.h"
 #include "system/kvm.h"
 #include "dirtylog.h"
-#include "exec/address-spaces.h"
+#include "system/address-spaces.h"
 
 #include "hw/boards.h" /* for machine_dump_guest_core() */
 
